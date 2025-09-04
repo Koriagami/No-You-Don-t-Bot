@@ -269,6 +269,12 @@ async function checkAndDeleteMessage(message, partials) {
   const content = message.content.toLowerCase();
   if (!content.includes("http")) return false;
 
+  // Check if bot has permission to delete messages
+  if (!message.guild.members.me.permissions.has("ManageMessages")) {
+    console.error("Bot lacks 'Manage Messages' permission to delete messages");
+    return false;
+  }
+
   for (const partial of partials) {
     if (content.includes(partial)) {
       try {
@@ -276,9 +282,9 @@ async function checkAndDeleteMessage(message, partials) {
         console.log(`Deleted message containing "${partial}" from ${message.author.tag}`);
         return true;
       } catch (err) {
-        console.error("Failed to delete message:", err);
+        console.error(`Failed to delete message containing "${partial}":`, err);
+        return false; // Return false if deletion failed
       }
-      return true;
     }
   }
   return false;
