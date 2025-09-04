@@ -25,7 +25,7 @@
 
 const { Client, GatewayIntentBits, Partials, SlashCommandBuilder, Routes, PermissionFlagsBits } = require("discord.js");
 const { REST } = require("@discordjs/rest");
-const { token, clientId } = require("./config.json");
+require("dotenv").config();
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -110,8 +110,8 @@ async function registerCommands() {
       .setDMPermission(false),
   ];
 
-  const rest = new REST({ version: "10" }).setToken(token);
-  await rest.put(Routes.applicationCommands(clientId), { body: commands });
+  const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+  await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
   console.log("NYD commands registered");
 }
 
@@ -192,6 +192,13 @@ client.on("interactionCreate", async (interaction) => {
 // Monitor messages
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
+
+  // Check if we have access to message content
+  if (!message.content) {
+    console.log("Message content not available - MessageContent intent may not be enabled");
+    return;
+  }
+
   const guildId = message.guildId;
 
   // Check allowlist
@@ -239,4 +246,4 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.login(token);
+client.login(process.env.DISCORD_TOKEN);
