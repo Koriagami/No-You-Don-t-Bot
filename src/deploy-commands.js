@@ -22,8 +22,16 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN);
   try {
     console.log(`Started refreshing ${commands.length} application (/) commands.`);
 
-    // The put method is used to fully refresh all commands in the guild with the current set
-    const data = await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
+    let data;
+    if (process.env.GUILD_ID) {
+      // Deploy to specific guild (faster, for development)
+      console.log(`Deploying to guild ${process.env.GUILD_ID}...`);
+      data = await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body: commands });
+    } else {
+      // Deploy globally (slower, for production)
+      console.log("Deploying globally...");
+      data = await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
+    }
 
     console.log(`Successfully reloaded ${data.length} application (/) commands.`);
   } catch (error) {

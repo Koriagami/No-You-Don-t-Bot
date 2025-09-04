@@ -27,6 +27,16 @@ const { Client, GatewayIntentBits, Partials, SlashCommandBuilder, Routes, Permis
 const { REST } = require("@discordjs/rest");
 require("dotenv").config();
 
+// Validate required environment variables
+if (!process.env.DISCORD_TOKEN) {
+  console.error("❌ DISCORD_TOKEN is required in .env file");
+  process.exit(1);
+}
+if (!process.env.CLIENT_ID) {
+  console.error("❌ CLIENT_ID is required in .env file");
+  process.exit(1);
+}
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
   partials: [Partials.Channel],
@@ -127,6 +137,12 @@ client.on("interactionCreate", async (interaction) => {
   const sub = interaction.options.getSubcommand();
   const guildId = interaction.guildId;
 
+  // Check if command is used in a guild
+  if (!guildId) {
+    await interaction.reply({ content: "❌ This command can only be used in a server.", ephemeral: true });
+    return;
+  }
+
   function ensureAllowlist() {
     if (!allowLists.has(guildId)) {
       allowLists.set(guildId, { users: new Set(), roles: new Set() });
@@ -134,7 +150,64 @@ client.on("interactionCreate", async (interaction) => {
     return allowLists.get(guildId);
   }
 
-  // Existing per-channel & global logic unchanged...
+  // Channel-specific commands
+  if (sub === "block") {
+    const channel = interaction.options.getChannel("channel");
+    const partial = interaction.options.getString("filtered_partial").toLowerCase();
+
+    if (!blockRules.has(channel.id)) {
+      blockRules.set(channel.id, new Set());
+    }
+    blockRules.get(channel.id).add(partial);
+    await interaction.reply({ content: `✅ Blocked links containing "${partial}" in ${channel}.`, ephemeral: true });
+  }
+
+  if (sub === "list") {
+    const channel = interaction.options.getChannel("channel");
+    const partials = blockRules.get(channel.id);
+    const list = partials ? Array.from(partials).join(", ") : "None";
+    await interaction.reply({ content: `📋 Blocked partials in ${channel}: ${list}`, ephemeral: true });
+  }
+
+  if (sub === "unblock") {
+    const channel = interaction.options.getChannel("channel");
+    const partial = interaction.options.getString("filtered_partial").toLowerCase();
+
+    if (!blockRules.has(channel.id) || !blockRules.get(channel.id).has(partial)) {
+      await interaction.reply({ content: `⚠️ "${partial}" was not blocked in ${channel}.`, ephemeral: true });
+      return;
+    }
+    blockRules.get(channel.id).delete(partial);
+    await interaction.reply({ content: `✅ Removed "${partial}" from ${channel} block list.`, ephemeral: true });
+  }
+
+  // Global commands
+  if (sub === "block-global") {
+    const partial = interaction.options.getString("filtered_partial").toLowerCase();
+
+    if (!globalBlockRules.has(guildId)) {
+      globalBlockRules.set(guildId, new Set());
+    }
+    globalBlockRules.get(guildId).add(partial);
+    await interaction.reply({ content: `✅ Blocked links containing "${partial}" server-wide.`, ephemeral: true });
+  }
+
+  if (sub === "list-global") {
+    const partials = globalBlockRules.get(guildId);
+    const list = partials ? Array.from(partials).join(", ") : "None";
+    await interaction.reply({ content: `📋 Globally blocked partials: ${list}`, ephemeral: true });
+  }
+
+  if (sub === "unblock-global") {
+    const partial = interaction.options.getString("filtered_partial").toLowerCase();
+
+    if (!globalBlockRules.has(guildId) || !globalBlockRules.get(guildId).has(partial)) {
+      await interaction.reply({ content: `⚠️ "${partial}" was not globally blocked.`, ephemeral: true });
+      return;
+    }
+    globalBlockRules.get(guildId).delete(partial);
+    await interaction.reply({ content: `✅ Removed "${partial}" from global block list.`, ephemeral: true });
+  }
 
   // Allowlist - user
   if (sub === "allow-user") {
@@ -189,6 +262,28 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+// Helper function to check if message should be deleted
+async function checkAndDeleteMessage(message, partials) {
+  if (!partials || partials.size === 0) return false;
+
+  const content = message.content.toLowerCase();
+  if (!content.includes("http")) return false;
+
+  for (const partial of partials) {
+    if (content.includes(partial)) {
+      try {
+        await message.delete();
+        console.log(`Deleted message containing "${partial}" from ${message.author.tag}`);
+        return true;
+      } catch (err) {
+        console.error("Failed to delete message:", err);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 // Monitor messages
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -200,6 +295,7 @@ client.on("messageCreate", async (message) => {
   }
 
   const guildId = message.guildId;
+  if (!guildId) return; // Skip DMs
 
   // Check allowlist
   if (allowLists.has(guildId)) {
@@ -209,40 +305,15 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  const content = message.content.toLowerCase();
-
-  // Channel-specific rules
+  // Check channel-specific rules first
   if (blockRules.has(message.channel.id)) {
-    const partials = blockRules.get(message.channel.id);
-    if (content.includes("http")) {
-      for (const partial of partials) {
-        if (content.includes(partial)) {
-          try {
-            await message.delete();
-          } catch (err) {
-            console.error("Failed delete:", err);
-          }
-          return;
-        }
-      }
-    }
+    const deleted = await checkAndDeleteMessage(message, blockRules.get(message.channel.id));
+    if (deleted) return;
   }
 
-  // Global rules
+  // Check global rules
   if (globalBlockRules.has(guildId)) {
-    const partials = globalBlockRules.get(guildId);
-    if (content.includes("http")) {
-      for (const partial of partials) {
-        if (content.includes(partial)) {
-          try {
-            await message.delete();
-          } catch (err) {
-            console.error("Failed delete:", err);
-          }
-          return;
-        }
-      }
-    }
+    await checkAndDeleteMessage(message, globalBlockRules.get(guildId));
   }
 });
 
