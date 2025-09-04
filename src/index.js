@@ -116,7 +116,7 @@ async function registerCommands() {
           .addRoleOption((opt) => opt.setName("role").setDescription("Role to remove from allowlist").setRequired(true))
       )
       .addSubcommand((sub) => sub.setName("list-allow").setDescription("List all allowlisted users and roles in this server"))
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .setDMPermission(false),
   ];
 
@@ -140,6 +140,15 @@ client.on("interactionCreate", async (interaction) => {
   // Check if command is used in a guild
   if (!guildId) {
     await interaction.reply({ content: "❌ This command can only be used in a server.", ephemeral: true });
+    return;
+  }
+
+  // Check if user has administrator permissions
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({
+      content: "❌ This command can only be used by server administrators.",
+      ephemeral: true,
+    });
     return;
   }
 
