@@ -15,18 +15,23 @@
    /nyd remove-allow-role <role>
    /nyd list-allow
    /nyd watchman <channel> <enable/disable>
- - Tracks rules in memory (per channel, globally, and allowlist)
+   /nyd backup
+   /nyd stats
+ - Tracks rules with persistent storage (per channel, globally, and allowlist)
  - Deletes any user message in specified channel or globally if it contains link(s) with prohibited partials, unless user or role is allowlisted
  - Watchman mode: When enabled for a channel, monitors the latest message and 5 previous messages to prevent users from editing already sent messages
+ - Data persistence: All settings are saved to disk and restored on restart
+ - Backup system: Create backups of bot data for safety
 
  Requirements:
  - discord.js v14
  - Global slash commands
- - In-memory storage (no persistence across restarts)
+ - Persistent JSON file storage (survives restarts)
 */
 
 const { Client, GatewayIntentBits, Partials, SlashCommandBuilder, Routes, PermissionFlagsBits } = require("discord.js");
 const { REST } = require("@discordjs/rest");
+const DataManager = require("./data-manager");
 require("dotenv").config();
 
 // Validate required environment variables
@@ -44,14 +49,29 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-// In-memory store: channelId -> Set of partial strings
-const blockRules = new Map();
-// Global block list: guildId -> Set of partial strings
-const globalBlockRules = new Map();
-// Allowlist: guildId -> { users: Set<userId>, roles: Set<roleId> }
-const allowLists = new Map();
-// Watchman mode: channelId -> boolean (enabled/disabled)
-const watchmanChannels = new Set();
+// Initialize data manager
+const dataManager = new DataManager();
+
+// Data storage (will be loaded from file on startup)
+let blockRules = new Map();
+let globalBlockRules = new Map();
+let allowLists = new Map();
+let watchmanChannels = new Set();
+
+// Auto-save function
+async function autoSave() {
+  try {
+    const data = {
+      blockRules,
+      globalBlockRules,
+      allowLists,
+      watchmanChannels,
+    };
+    await dataManager.saveData(data);
+  } catch (error) {
+    console.error("❌ Auto-save failed:", error.message);
+  }
+}
 
 async function registerCommands() {
   const commands = [
@@ -133,6 +153,8 @@ async function registerCommands() {
               .addChoices({ name: "Enable", value: "enable" }, { name: "Disable", value: "disable" })
           )
       )
+      .addSubcommand((sub) => sub.setName("backup").setDescription("Create a backup of current bot data"))
+      .addSubcommand((sub) => sub.setName("stats").setDescription("Show bot data statistics"))
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .setDMPermission(false),
   ];
@@ -144,6 +166,24 @@ async function registerCommands() {
 
 client.once("ready", async () => {
   console.log(`NYD Bot logged in as ${client.user.tag}`);
+
+  // Load saved data
+  try {
+    const savedData = await dataManager.loadData();
+    blockRules = savedData.blockRules;
+    globalBlockRules = savedData.globalBlockRules;
+    allowLists = savedData.allowLists;
+    watchmanChannels = savedData.watchmanChannels;
+
+    const stats = dataManager.getDataStats(savedData);
+    console.log(
+      `📊 Loaded data: ${stats.channelsWithRules} channels with rules, ${stats.serversWithGlobalRules} servers with global rules, ${stats.watchmanChannels} watchman channels`
+    );
+  } catch (error) {
+    console.error("❌ Failed to load saved data:", error.message);
+    console.log("🔄 Starting with empty data");
+  }
+
   await registerCommands();
 });
 
@@ -185,6 +225,7 @@ client.on("interactionCreate", async (interaction) => {
       blockRules.set(channel.id, new Set());
     }
     blockRules.get(channel.id).add(partial);
+    await autoSave();
     await interaction.reply({ content: `✅ Blocked links containing "${partial}" in ${channel}.`, ephemeral: true });
   }
 
@@ -204,6 +245,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
     blockRules.get(channel.id).delete(partial);
+    await autoSave();
     await interaction.reply({ content: `✅ Removed "${partial}" from ${channel} block list.`, ephemeral: true });
   }
 
@@ -215,6 +257,7 @@ client.on("interactionCreate", async (interaction) => {
       globalBlockRules.set(guildId, new Set());
     }
     globalBlockRules.get(guildId).add(partial);
+    await autoSave();
     await interaction.reply({ content: `✅ Blocked links containing "${partial}" server-wide.`, ephemeral: true });
   }
 
@@ -232,6 +275,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
     globalBlockRules.get(guildId).delete(partial);
+    await autoSave();
     await interaction.reply({ content: `✅ Removed "${partial}" from global block list.`, ephemeral: true });
   }
 
@@ -240,6 +284,7 @@ client.on("interactionCreate", async (interaction) => {
     const user = interaction.options.getUser("user");
     const allow = ensureAllowlist();
     allow.users.add(user.id);
+    await autoSave();
     await interaction.reply({ content: `✅ ${user.tag} is now allowlisted.`, ephemeral: true });
   }
 
@@ -251,6 +296,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
     allow.users.delete(user.id);
+    await autoSave();
     await interaction.reply({ content: `✅ ${user.tag} removed from allowlist.`, ephemeral: true });
   }
 
@@ -259,6 +305,7 @@ client.on("interactionCreate", async (interaction) => {
     const role = interaction.options.getRole("role");
     const allow = ensureAllowlist();
     allow.roles.add(role.id);
+    await autoSave();
     await interaction.reply({ content: `✅ Role ${role.name} is now allowlisted.`, ephemeral: true });
   }
 
@@ -270,6 +317,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
     allow.roles.delete(role.id);
+    await autoSave();
     await interaction.reply({ content: `✅ Role ${role.name} removed from allowlist.`, ephemeral: true });
   }
 
@@ -299,6 +347,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
       watchmanChannels.add(channelId);
+      await autoSave();
       await interaction.reply({
         content: `✅ Watchman mode enabled for ${channel}. The bot will now monitor the latest message and 5 previous messages for prohibited partials.`,
         ephemeral: true,
@@ -309,8 +358,46 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
       watchmanChannels.delete(channelId);
+      await autoSave();
       await interaction.reply({ content: `✅ Watchman mode disabled for ${channel}.`, ephemeral: true });
     }
+  }
+
+  // Backup command
+  if (sub === "backup") {
+    try {
+      const data = {
+        blockRules,
+        globalBlockRules,
+        allowLists,
+        watchmanChannels,
+      };
+      await dataManager.createBackup(data);
+      await interaction.reply({ content: `✅ Backup created successfully!`, ephemeral: true });
+    } catch (error) {
+      await interaction.reply({ content: `❌ Failed to create backup: ${error.message}`, ephemeral: true });
+    }
+  }
+
+  // Stats command
+  if (sub === "stats") {
+    const data = {
+      blockRules,
+      globalBlockRules,
+      allowLists,
+      watchmanChannels,
+    };
+    const stats = dataManager.getDataStats(data);
+
+    const statsMessage = `📊 **Bot Data Statistics:**
+• Channels with rules: ${stats.channelsWithRules}
+• Servers with global rules: ${stats.serversWithGlobalRules}
+• Servers with allowlists: ${stats.serversWithAllowlists}
+• Watchman channels: ${stats.watchmanChannels}
+• Total channel block rules: ${stats.totalBlockRules}
+• Total global block rules: ${stats.totalGlobalRules}`;
+
+    await interaction.reply({ content: statsMessage, ephemeral: true });
   }
 });
 

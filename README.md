@@ -11,7 +11,9 @@
 - Manage rules via simple slash commands
 - Allowlist specific users or roles to bypass blocking
 - **Watchman mode**: Monitor recent messages to prevent users from editing already sent messages
-- Lightweight and in-memory (no database required)
+- **Persistent storage**: All settings are saved and restored on restart
+- **Backup system**: Create backups of bot data for safety
+- Lightweight with JSON file storage (no database required)
 
 ---
 
@@ -43,6 +45,11 @@ All commands are under the `/nyd` group.
 
 - `/nyd watchman <channel> <enable/disable>` → Enable or disable watchman mode for a channel
 
+### Data Management
+
+- `/nyd backup` → Create a backup of current bot data
+- `/nyd stats` → Show bot data statistics
+
 ---
 
 ## 🚀 How It Works
@@ -60,6 +67,15 @@ When watchman mode is enabled for a channel, the bot monitors not just the lates
 - Bypassing the bot's detection
 
 Watchman mode works with both channel-specific and global blocking rules.
+
+### Data Persistence
+
+All bot settings (block rules, allowlists, watchman settings) are automatically saved to a JSON file (`data/bot-data.json`) whenever changes are made. This means:
+
+- Settings persist across bot restarts and redeployments
+- No data loss when updating the bot
+- Automatic backups can be created with `/nyd backup`
+- Data statistics available with `/nyd stats`
 
 ---
 
