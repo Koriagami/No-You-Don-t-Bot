@@ -140,6 +140,7 @@ async function registerCommands() {
           .addRoleOption((opt) => opt.setName("role").setDescription("Role to remove from allowlist").setRequired(true))
       )
       .addSubcommand((sub) => sub.setName("list-allow").setDescription("List all allowlisted users and roles in this server"))
+
       .addSubcommand((sub) =>
         sub
           .setName("watchman")
