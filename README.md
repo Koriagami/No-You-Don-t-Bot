@@ -6,11 +6,12 @@
 
 ## ✨ Features
 
-* Block links containing specific partials per-channel
-* Block links server-wide
-* Manage rules via simple slash commands
-* Allowlist specific users or roles to bypass blocking
-* Lightweight and in-memory (no database required)
+- Block links containing specific partials per-channel
+- Block links server-wide
+- Manage rules via simple slash commands
+- Allowlist specific users or roles to bypass blocking
+- **Watchman mode**: Monitor recent messages to prevent users from editing already sent messages
+- Lightweight and in-memory (no database required)
 
 ---
 
@@ -20,23 +21,27 @@ All commands are under the `/nyd` group.
 
 ### Channel-Specific Rules
 
-* `/nyd block <channel> <filtered_partial>` → Block links containing the partial in a channel
-* `/nyd list <channel>` → List blocked partials in a channel
-* `/nyd unblock <channel> <filtered_partial>` → Remove a block from a channel
+- `/nyd block <channel> <filtered_partial>` → Block links containing the partial in a channel
+- `/nyd list <channel>` → List blocked partials in a channel
+- `/nyd unblock <channel> <filtered_partial>` → Remove a block from a channel
 
 ### Server-Wide Rules
 
-* `/nyd block-global <filtered_partial>` → Block links server-wide
-* `/nyd list-global` → List all globally blocked partials
-* `/nyd unblock-global <filtered_partial>` → Remove a global block
+- `/nyd block-global <filtered_partial>` → Block links server-wide
+- `/nyd list-global` → List all globally blocked partials
+- `/nyd unblock-global <filtered_partial>` → Remove a global block
 
 ### Allowlist
 
-* `/nyd allow-user <user>` → Exempt a user from blocking
-* `/nyd remove-allow <user>` → Remove a user from the allowlist
-* `/nyd allow-role <role>` → Exempt an entire role from blocking
-* `/nyd remove-allow-role <role>` → Remove a role from the allowlist
-* `/nyd list-allow` → Show all allowlisted users and roles
+- `/nyd allow-user <user>` → Exempt a user from blocking
+- `/nyd remove-allow <user>` → Remove a user from the allowlist
+- `/nyd allow-role <role>` → Exempt an entire role from blocking
+- `/nyd remove-allow-role <role>` → Remove a role from the allowlist
+- `/nyd list-allow` → Show all allowlisted users and roles
+
+### Watchman Mode
+
+- `/nyd watchman <channel> <enable/disable>` → Enable or disable watchman mode for a channel
 
 ---
 
@@ -46,13 +51,23 @@ All commands are under the `/nyd` group.
 2. If a match is found, the message is deleted automatically.
 3. If the user or their role is allowlisted, the message will not be deleted even if it matches a blocked partial.
 
+### Watchman Mode
+
+When watchman mode is enabled for a channel, the bot monitors not just the latest message, but also the 5 previous messages. This prevents users from:
+
+- Sending a clean message first
+- Then editing it to add prohibited links
+- Bypassing the bot's detection
+
+Watchman mode works with both channel-specific and global blocking rules.
+
 ---
 
 ## ⚙️ Requirements
 
-* Node.js 16.9.0 or higher
-* `discord.js` v14
-* A Discord Bot Token
+- Node.js 16.9.0 or higher
+- `discord.js` v14
+- A Discord Bot Token
 
 ---
 
@@ -64,6 +79,7 @@ All commands are under the `/nyd` group.
    ```bash
    npm install discord.js
    ```
+
 3. Create a `config.json` file with:
 
    ```json
@@ -72,6 +88,7 @@ All commands are under the `/nyd` group.
      "clientId": "YOUR_CLIENT_ID"
    }
    ```
+
 4. Run the bot:
 
    ```bash
@@ -84,9 +101,9 @@ All commands are under the `/nyd` group.
 
 The bot requires:
 
-* **Manage Messages** → to delete blocked messages
-* **Read Messages/View Channels** → to monitor messages
-* **Send Messages** → to reply with command confirmations
+- **Manage Messages** → to delete blocked messages
+- **Read Messages/View Channels** → to monitor messages
+- **Send Messages** → to reply with command confirmations
 
 ---
 
@@ -108,4 +125,16 @@ Allow a moderator to bypass filtering:
 
 ```
 /nyd allow-role @Moderators
+```
+
+Enable watchman mode for `#general` to prevent message editing bypass:
+
+```
+/nyd watchman #general enable
+```
+
+Disable watchman mode for `#general`:
+
+```
+/nyd watchman #general disable
 ```
