@@ -14,8 +14,10 @@
    /nyd allow-role <role>
    /nyd remove-allow-role <role>
    /nyd list-allow
+   /nyd watchman <channel> <enable/disable>
  - Tracks rules in memory (per channel, globally, and allowlist)
  - Deletes any user message in specified channel or globally if it contains link(s) with prohibited partials, unless user or role is allowlisted
+ - Watchman mode: When enabled for a channel, monitors the latest message and 5 previous messages to prevent users from editing already sent messages
 
  Requirements:
  - discord.js v14
@@ -48,6 +50,8 @@ const blockRules = new Map();
 const globalBlockRules = new Map();
 // Allowlist: guildId -> { users: Set<userId>, roles: Set<roleId> }
 const allowLists = new Map();
+// Watchman mode: channelId -> boolean (enabled/disabled)
+const watchmanChannels = new Set();
 
 async function registerCommands() {
   const commands = [
@@ -116,6 +120,20 @@ async function registerCommands() {
           .addRoleOption((opt) => opt.setName("role").setDescription("Role to remove from allowlist").setRequired(true))
       )
       .addSubcommand((sub) => sub.setName("list-allow").setDescription("List all allowlisted users and roles in this server"))
+
+      .addSubcommand((sub) =>
+        sub
+          .setName("watchman")
+          .setDescription("Enable or disable watchman mode for a channel (monitors 5 previous messages)")
+          .addChannelOption((opt) => opt.setName("channel").setDescription("Channel to monitor").setRequired(true))
+          .addStringOption((opt) =>
+            opt
+              .setName("is_enabled")
+              .setDescription("Enable or disable watchman mode")
+              .setRequired(true)
+              .addChoices({ name: "Enable", value: "enable" }, { name: "Disable", value: "disable" })
+          )
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .setDMPermission(false),
   ];
@@ -269,6 +287,32 @@ client.on("interactionCreate", async (interaction) => {
         .join(", ") || "None";
     await interaction.reply({ content: `✅ Allowlisted users: ${userMentions}\n✅ Allowlisted roles: ${roleMentions}`, ephemeral: true });
   }
+
+  // Watchman command
+  if (sub === "watchman") {
+    const channel = interaction.options.getChannel("channel");
+    const isEnabled = interaction.options.getString("is_enabled") === "enable";
+    const channelId = channel.id;
+
+    if (isEnabled) {
+      if (watchmanChannels.has(channelId)) {
+        await interaction.reply({ content: `⚠️ Watchman mode is already enabled for ${channel}.`, ephemeral: true });
+        return;
+      }
+      watchmanChannels.add(channelId);
+      await interaction.reply({
+        content: `✅ Watchman mode enabled for ${channel}. The bot will now monitor the latest message and 5 previous messages for prohibited partials.`,
+        ephemeral: true,
+      });
+    } else {
+      if (!watchmanChannels.has(channelId)) {
+        await interaction.reply({ content: `⚠️ Watchman mode is already disabled for ${channel}.`, ephemeral: true });
+        return;
+      }
+      watchmanChannels.delete(channelId);
+      await interaction.reply({ content: `✅ Watchman mode disabled for ${channel}.`, ephemeral: true });
+    }
+  }
 });
 
 // Helper function to check if message should be deleted
@@ -299,6 +343,49 @@ async function checkAndDeleteMessage(message, partials) {
   return false;
 }
 
+// Helper function to check multiple messages for watchman mode
+async function checkMultipleMessages(channel, partials, limit = 6) {
+  if (!partials || partials.size === 0) return false;
+
+  try {
+    // Fetch the last 6 messages (current + 5 previous)
+    const messages = await channel.messages.fetch({ limit });
+
+    for (const message of messages.values()) {
+      // Skip bot messages
+      if (message.author.bot) continue;
+
+      // Check if we have access to message content
+      if (!message.content) continue;
+
+      const content = message.content.toLowerCase();
+      if (!content.includes("http")) continue;
+
+      // Check if bot has permission to delete messages
+      if (!message.guild.members.me.permissions.has("ManageMessages")) {
+        console.error("Bot lacks 'Manage Messages' permission to delete messages");
+        continue;
+      }
+
+      for (const partial of partials) {
+        if (content.includes(partial)) {
+          try {
+            await message.delete();
+            console.log(`[Watchman] Deleted message containing "${partial}" from ${message.author.tag}`);
+            return true;
+          } catch (err) {
+            console.error(`[Watchman] Failed to delete message containing "${partial}":`, err);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Failed to fetch messages for watchman check:", err);
+  }
+
+  return false;
+}
+
 // Monitor messages
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -320,15 +407,30 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // Check channel-specific rules first
-  if (blockRules.has(message.channel.id)) {
-    const deleted = await checkAndDeleteMessage(message, blockRules.get(message.channel.id));
-    if (deleted) return;
-  }
+  // Check if watchman mode is enabled for this channel
+  if (watchmanChannels.has(message.channel.id)) {
+    // Check channel-specific rules with watchman mode
+    if (blockRules.has(message.channel.id)) {
+      const deleted = await checkMultipleMessages(message.channel, blockRules.get(message.channel.id));
+      if (deleted) return;
+    }
 
-  // Check global rules
-  if (globalBlockRules.has(guildId)) {
-    await checkAndDeleteMessage(message, globalBlockRules.get(guildId));
+    // Check global rules with watchman mode
+    if (globalBlockRules.has(guildId)) {
+      await checkMultipleMessages(message.channel, globalBlockRules.get(guildId));
+    }
+  } else {
+    // Normal mode - check only the current message
+    // Check channel-specific rules first
+    if (blockRules.has(message.channel.id)) {
+      const deleted = await checkAndDeleteMessage(message, blockRules.get(message.channel.id));
+      if (deleted) return;
+    }
+
+    // Check global rules
+    if (globalBlockRules.has(guildId)) {
+      await checkAndDeleteMessage(message, globalBlockRules.get(guildId));
+    }
   }
 });
 
